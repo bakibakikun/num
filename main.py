@@ -33,8 +33,8 @@ HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.bdjjtisuhtbrogvotves:Alex4382!@aws-0-eu-north-1.pooler.supabase.com:6543/postgres"
 BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-CRYPTOCLOUD_KEY = os.getenv("CRYPTOCLOUD_API_KEY", "your_cryptocloud_api_key_here")
-CRYPTOCLOUD_SHOP = os.getenv("CRYPTOCLOUD_SHOP_ID", "your_cryptocloud_shop_id_here")
+CRYPTOCLOUD_KEY = os.getenv("CRYPTOCLOUD_API_KEY", "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1dWlkIjoiTlRVM056WT0iLCJ0eXBlIjoicHJvamVjdCIsInYiOiI3MGQ2YmMwYzM2ODE5MzExMzRmMGNjNDA1MTVlZmViYjI3ZjA2MjQ0ODVkOWM1MzQ4ZjE3NzcwYTU2NGVkNDQzIiwiZXhwIjo4ODE0NzY0MzkwMn0.P8MAez009Fv0AF8XUTUBVGZ0C7rvddJWeHZI1KtDSdU")
+CRYPTOCLOUD_SHOP = os.getenv("CRYPTOCLOUD_SHOP_ID", "qPPr3ZALOPIZ402t")
 
 # Detect environment
 ENV = "koyeb"
