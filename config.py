@@ -7,10 +7,10 @@ def fetch_bot_settings():
             "PRIVATE_CHANNEL_ID": -1002609563244,
             "PRICE": 3.00,
             "DESCRIPTION": (
-                "Plan: Standard\n"
+                "Membership: Basic\n"
                 "Cost: {price} RUB 🇷🇺\n"
-                "Duration: 1 month\n\n"
-                "Access to exclusive 18+ channel"
+                "Duration: 30 days\n\n"
+                "Join exclusive 18+ community"
             ),
             "TON_MERCHANT_ID": "your_ton_merchant_id_here",
             "TON_API_TOKEN": "your_ton_api_token_here"
