@@ -32,7 +32,7 @@ TON_HOOK = "/ton_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.bdjjtisuhtbrogvotves:Alex4382!@aws-0-eu-north-1.pooler.supabase.com:6543/postgres"
-BASE_URL = os.getenv("HOST_URL", "https://solar-galina-clubleness-a9e3e8d6.koyeb.app")
+BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
 CRYPTOCLOUD_KEY = os.getenv("CRYPTOCLOUD_API_KEY", "your_cryptocloud_api_key_here")
 CRYPTOCLOUD_SHOP = os.getenv("CRYPTOCLOUD_SHOP_ID", "your_cryptocloud_shop_id_here")
 
