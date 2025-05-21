@@ -5,94 +5,80 @@ import psycopg2
 import hashlib
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiohttp import web, ClientSession
+from aiohttp import web
 from urllib.parse import urlencode
 import asyncio
 import os
 from config import fetch_bot_settings
-import qrcode
-import io
-from PIL import Image
 
-# Setup logging
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     stream=sys.stdout
 )
 log = logging.getLogger(__name__)
-log.info("Starting subscription bot")
+log.info("Запуск бота подписки")
 
-# Define endpoints and database
+# Определение путей и базы данных
 PAYMENT_STORE = "/store_payment"
 YOOMONEY_HOOK = "/yoomoney_hook"
-CRYPTO_HOOK = "/crypto_hook"
-TON_HOOK = "/ton_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-CRYPTOCLOUD_KEY = os.getenv("CRYPTOCLOUD_API_KEY", "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1dWlkIjoiTlRVM056WT0iLCJ0eXBlIjoicHJvamVjdCIsInYiOiI3MGQ2YmMwYzM2ODE5MzExMzRmMGNjNDA1MTVlZmViYjI3ZjA2MjQ0ODVkOWM1MzQ4ZjE3NzcwYTU2NGVkNDQzIiwiZXhwIjo4ODE0NzY0MzkwMn0.P8MAez009Fv0AF8XUTUBVGZ0C7rvddJWeHZI1KtDSdU")
-CRYPTOCLOUD_SHOP = os.getenv("CRYPTOCLOUD_SHOP_ID", "qPPr3ZALOPIZ402t")
 
-# Validate environment variables
-if not CRYPTOCLOUD_KEY or not CRYPTOCLOUD_SHOP:
-    log.error("Missing CRYPTOCLOUD_API_KEY or CRYPTOCLOUD_SHOP_ID")
-    sys.exit(1)
-
-# Environment
+# Окружение
 ENV = "koyeb"
-log.info(f"Platform: {ENV}")
+log.info(f"Платформа: {ENV}")
 
-# Load bot configurations
+# Загрузка конфигураций ботов
 SETTINGS = fetch_bot_settings()
-log.info(f"Configuring {len(SETTINGS)} bots")
+log.info(f"Настройка {len(SETTINGS)} ботов")
 bot_instances = {}
 dispatchers = {}
 
 for bot_key, cfg in SETTINGS.items():
     try:
-        log.info(f"Initializing bot {bot_key}")
+        log.info(f"Инициализация бота {bot_key}")
         bot_instances[bot_key] = Bot(token=cfg["TOKEN"])
         dispatchers[bot_key] = Dispatcher(bot_instances[bot_key])
-        log.info(f"Bot {bot_key} initialized")
+        log.info(f"Бот {bot_key} инициализирован")
     except Exception as e:
-        log.error(f"Bot {bot_key} initialization failed: {e}")
+        log.error(f"Ошибка инициализации бота {bot_key}: {e}")
         sys.exit(1)
 
-# Database initialization
+# Инициализация базы данных
 def setup_database():
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
         for bot_key in SETTINGS:
-            # Create table with label, user_id, status, payment_type
+            # Создание таблицы для каждого бота
             cursor.execute(
                 f"CREATE TABLE IF NOT EXISTS payments_{bot_key} "
                 "(label TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL, payment_type TEXT)"
             )
-            # Add payment_type column if missing (for compatibility)
+            # Добавление столбца payment_type, если отсутствует
             cursor.execute(
                 f"ALTER TABLE payments_{bot_key} ADD COLUMN IF NOT EXISTS payment_type TEXT"
             )
         conn.commit()
         conn.close()
-        log.info("Database initialized and schema updated")
+        log.info("База данных настроена и схема обновлена")
     except Exception as e:
-        log.error(f"Database error: {e}")
+        log.error(f"Ошибка базы данных: {e}")
         sys.exit(1)
 
 setup_database()
 
-# Payment buttons
+# Кнопки оплаты
 def create_payment_buttons(user_id, price):
     keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("YooMoney", callback_data=f"yoomoney_{user_id}"))
-    keyboard.add(InlineKeyboardButton("Cryptocurrency", callback_data=f"crypto_{user_id}"))
-    keyboard.add(InlineKeyboardButton("TON Wallet", callback_data=f"ton_{user_id}"))
+    keyboard.add(InlineKeyboardButton("Оплатить через ЮMoney", callback_data=f"yoomoney_{user_id}"))
     return keyboard
 
-# Command handlers
+# Обработчики команд
 for bot_key, dp in dispatchers.items():
     @dp.message_handler(commands=["start"])
     async def initiate_payment(msg: types.Message, bot_key=bot_key):
@@ -101,19 +87,19 @@ for bot_key, dp in dispatchers.items():
             chat_id = msg.chat.id
             bot = bot_instances[bot_key]
             cfg = SETTINGS[bot_key]
-            log.info(f"[{bot_key}] /start from user {user_id}")
+            log.info(f"[{bot_key}] Команда /start от пользователя {user_id}")
 
             keyboard = create_payment_buttons(user_id, cfg["PRICE"])
             welcome_msg = cfg["DESCRIPTION"].format(price=cfg["PRICE"])
             await bot.send_message(
                 chat_id,
-                f"{welcome_msg}\n\nSelect payment method for {cfg['PRICE']} RUB:",
+                f"{welcome_msg}\n\nВыберите способ оплаты для {cfg['PRICE']} RUB:",
                 reply_markup=keyboard
             )
-            log.info(f"[{bot_key}] Sent payment options to user {user_id}")
+            log.info(f"[{bot_key}] Отправлены варианты оплаты пользователю {user_id}")
         except Exception as e:
-            log.error(f"[{bot_key}] /start error: {e}")
-            await bot_instances[bot_key].send_message(chat_id, "Error. Try again.")
+            log.error(f"[{bot_key}] Ошибка /start: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
 
     @dp.callback_query_handler(lambda c: c.data.startswith("yoomoney_"))
     async def handle_yoomoney_choice(cb: types.CallbackQuery, bot_key=bot_key):
@@ -123,13 +109,13 @@ for bot_key, dp in dispatchers.items():
             bot = bot_instances[bot_key]
             cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] YooMoney chosen by user {user_id}")
+            log.info(f"[{bot_key}] Выбран ЮMoney пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
             payment_data = {
                 "quickpay-form": "shop",
                 "paymentType": "AC",
-                "targets": f"Subscription user {user_id}",
+                "targets": f"Подписка пользователя {user_id}",
                 "sum": cfg["PRICE"],
                 "label": payment_id,
                 "receiver": cfg["YOOMONEY_WALLET"],
@@ -137,7 +123,7 @@ for bot_key, dp in dispatchers.items():
             }
             payment_link = f"https://yoomoney.ru/quickpay/confirm.xml?{urlencode(payment_data)}"
 
-            # Save payment
+            # Сохранение платежа
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
@@ -147,17 +133,19 @@ for bot_key, dp in dispatchers.items():
             )
             conn.commit()
             conn.close()
-            log.info(f"[{bot_key}] Stored payment {payment_id} for user {user_id}")
+            log.info(f"[{bot_key}] Сохранен платеж {payment_id} для пользователя {user_id}")
 
-            # Send payment link
+            # Отправка ссылки на оплату
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Pay Now", url=payment_link))
-            await bot.send_message(chat_id, "Proceed with YooMoney payment:", reply_markup=keyboard)
-            log.info(f"[{bot_key}] YooMoney link sent to user {user_id}")
+            keyboard.add(InlineKeyboardButton("Оплатить сейчас", url=payment_link))
+            await bot.send_message(chat_id, "Перейдите для оплаты через ЮMoney:", reply_markup=keyboard)
+            log.info(f"[{bot_key}] Ссылка ЮMoney отправлена пользователю {user_id}")
         except Exception as e:
-            log.error(f"[{bot_key}] YooMoney error: {e}")
-            await bot_instances[bot_key].send_message(chat_id, "Payment error. Try again.")
+            log.error(f"[{bot_key}] Ошибка ЮMoney: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
+    # Закомментированные обработчики для CryptoCloud и TON Wallet
+    """
     @dp.callback_query_handler(lambda c: c.data.startswith("crypto_") and not c.data.startswith(("crypto_usdt_", "crypto_btc_", "crypto_ton_")))
     async def handle_crypto_choice(cb: types.CallbackQuery, bot_key=bot_key):
         try:
@@ -212,7 +200,7 @@ for bot_key, dp in dispatchers.items():
                     address = result["result"]["address"]
                     pay_url = result["result"]["link"]
 
-            # Save payment
+            # Сохранение платежа
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
@@ -224,7 +212,7 @@ for bot_key, dp in dispatchers.items():
             conn.close()
             log.info(f"[{bot_key}] Stored crypto payment {payment_id} for user {user_id}")
 
-            # Generate QR code
+            # Генерация QR-кода
             qr = qrcode.QRCode(version=1, box_size=10, border=4)
             qr.add_data(f"{currency.lower()}:{address}?amount={amount}")
             qr.make(fit=True)
@@ -232,7 +220,7 @@ for bot_key, dp in dispatchers.items():
             buffer = io.BytesIO()
             img.save(buffer, format="PNG")
 
-            # Send payment details
+            # Отправка деталей платежа
             await bot.send_photo(
                 chat_id,
                 photo=buffer.getvalue(),
@@ -284,7 +272,7 @@ for bot_key, dp in dispatchers.items():
                         return
                     pay_url = result["result"]["payment_url"]
 
-            # Save payment
+            # Сохранение платежа
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
@@ -296,7 +284,7 @@ for bot_key, dp in dispatchers.items():
             conn.close()
             log.info(f"[{bot_key}] Stored TON payment {payment_id} for user {user_id}")
 
-            # Send payment link
+            # Отправка ссылки на оплату
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("Pay via TON", url=pay_url))
             await bot.send_message(
@@ -308,8 +296,9 @@ for bot_key, dp in dispatchers.items():
         except Exception as e:
             log.error(f"[{bot_key}] TON payment error: {e}")
             await bot_instances[bot_key].send_message(chat_id, "TON payment error. Try again.")
+    """
 
-# Validate YooMoney webhook
+# Проверка вебхука ЮMoney
 def check_yoomoney_webhook(data, bot_key):
     try:
         cfg = SETTINGS[bot_key]
@@ -325,20 +314,20 @@ def check_yoomoney_webhook(data, bot_key):
             data.get("label", "")
         ]
         computed_hash = hashlib.sha1("&".join(params).encode()).hexdigest()
-        log.debug(f"[{bot_key}] YooMoney hash: {computed_hash}, received: {data.get('sha1_hash')}")
+        log.debug(f"[{bot_key}] Хэш ЮMoney: {computed_hash}, получено: {data.get('sha1_hash')}")
         return computed_hash == data.get("sha1_hash")
     except Exception as e:
-        log.error(f"[{bot_key}] YooMoney validation error: {e}")
+        log.error(f"[{bot_key}] Ошибка проверки ЮMoney: {e}")
         return False
 
-# Generate channel invite
+# Генерация приглашения в канал
 async def generate_channel_invite(bot_key, user_id):
     try:
         cfg = SETTINGS[bot_key]
         bot = bot_instances[bot_key]
         bot_member = await bot.get_chat_member(chat_id=cfg["PRIVATE_CHANNEL_ID"], user_id=(await bot.get_me()).id)
         if not bot_member.can_invite_users:
-            log.error(f"[{bot_key}] Bot lacks invite permission for channel {cfg['PRIVATE_CHANNEL_ID']}")
+            log.error(f"[{bot_key}] У бота нет прав на создание приглашений для канала {cfg['PRIVATE_CHANNEL_ID']}")
             return None
 
         for _ in range(3):
@@ -346,20 +335,20 @@ async def generate_channel_invite(bot_key, user_id):
                 invite = await bot.create_chat_invite_link(
                     chat_id=cfg["PRIVATE_CHANNEL_ID"],
                     member_limit=1,
-                    name=f"user_{user_id}_access"
+                    name=f"пользователь_{user_id}_доступ"
                 )
-                log.info(f"[{bot_key}] Created invite for user {user_id}: {invite.invite_link}")
+                log.info(f"[{bot_key}] Создано приглашение для пользователя {user_id}: {invite.invite_link}")
                 return invite.invite_link
             except Exception as e:
-                log.warning(f"[{bot_key}] Invite attempt failed: {e}")
+                log.warning(f"[{bot_key}] Не удалось создать приглашение: {e}")
                 await asyncio.sleep(1)
-        log.error(f"[{bot_key}] Failed to create invite for user {user_id}")
+        log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
         return None
     except Exception as e:
-        log.error(f"[{bot_key}] Invite error: {e}")
+        log.error(f"[{bot_key}] Ошибка создания приглашения: {e}")
         return None
 
-# Locate bot by payment ID
+# Поиск бота по ID платежа
 def locate_bot_by_payment(payment_id):
     try:
         for bot_key in SETTINGS:
@@ -369,32 +358,32 @@ def locate_bot_by_payment(payment_id):
             result = cursor.fetchone()
             conn.close()
             if result:
-                log.info(f"[{bot_key}] Found payment {payment_id}")
+                log.info(f"[{bot_key}] Найден платеж {payment_id}")
                 return bot_key
-        log.warning(f"Payment {payment_id} not found")
+        log.warning(f"Платеж {payment_id} не найден")
         return None
     except Exception as e:
-        log.error(f"Payment lookup error: {e}")
+        log.error(f"Ошибка поиска платежа: {e}")
         return None
 
-# YooMoney webhook handler
+# Обработчик вебхука ЮMoney
 async def process_yoomoney_webhook(req):
     try:
         data = await req.post()
-        log.info(f"[{ENV}] YooMoney webhook: {dict(data)}")
+        log.info(f"[{ENV}] Вебхук ЮMoney: {dict(data)}")
         payment_id = data.get("label")
         if not payment_id:
-            log.error(f"[{ENV}] Missing payment ID")
-            return web.Response(status=400, text="No payment ID")
+            log.error(f"[{ENV}] Отсутствует ID платежа")
+            return web.Response(status=400, text="Нет ID платежа")
 
         bot_key = locate_bot_by_payment(payment_id)
         if not bot_key:
-            log.error(f"[{ENV}] Bot not found for payment {payment_id}")
-            return web.Response(status=400, text="Bot not found")
+            log.error(f"[{ENV}] Бот не найден для платежа {payment_id}")
+            return web.Response(status=400, text="Бот не найден")
 
         if not check_yoomoney_webhook(data, bot_key):
-            log.error(f"[{bot_key}] Invalid YooMoney webhook")
-            return web.Response(status=400, text="Invalid signature")
+            log.error(f"[{bot_key}] Неверный вебхук ЮMoney")
+            return web.Response(status=400, text="Неверная подпись")
 
         if data.get("notification_type") in ["p2p-incoming", "card-incoming"]:
             conn = psycopg2.connect(DB_URL)
@@ -409,23 +398,24 @@ async def process_yoomoney_webhook(req):
                 )
                 conn.commit()
                 bot = bot_instances[bot_key]
-                await bot.send_message(user_id, "Payment confirmed!")
+                await bot.send_message(user_id, "Платеж подтвержден!")
                 invite = await generate_channel_invite(bot_key, user_id)
                 if invite:
-                    await bot.send_message(user_id, f"Join channel: {invite}")
-                    log.info(f"[{bot_key}] Processed payment {payment_id} for user {user_id}")
+                    await bot.send_message(user_id, f"Присоединяйтесь к каналу: {invite}")
+                    log.info(f"[{bot_key}] Обработан платеж {payment_id} для пользователя {user_id}")
                 else:
-                    await bot.send_message(user_id, "Invite error. Contact @YourSupportHandle.")
-                    log.error(f"[{bot_key}] Invite failed for user {user_id}")
+                    await bot.send_message(user_id, "Ошибка приглашения. Свяжитесь с @YourSupportHandle.")
+                    log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
             else:
-                log.error(f"[{bot_key}] Payment {payment_id} not found")
+                log.error(f"[{bot_key}] Платеж {payment_id} не найден")
             conn.close()
         return web.Response(status=200)
     except Exception as e:
-        log.error(f"[{ENV}] YooMoney webhook error: {e}")
+        log.error(f"[{ENV}] Ошибка вебхука ЮMoney: {e}")
         return web.Response(status=500)
 
-# CryptoCloud webhook handler
+# Закомментированные обработчики для CryptoCloud и TON Wallet
+"""
 async def process_crypto_webhook(req, bot_key):
     try:
         data = await req.json()
@@ -465,7 +455,6 @@ async def process_crypto_webhook(req, bot_key):
         log.error(f"[{bot_key}] Crypto webhook error: {e}")
         return web.Response(status=500)
 
-# TON Wallet webhook handler
 async def process_ton_webhook(req, bot_key):
     try:
         data = await req.json()
@@ -504,18 +493,19 @@ async def process_ton_webhook(req, bot_key):
     except Exception as e:
         log.error(f"[{bot_key}] TON webhook error: {e}")
         return web.Response(status=500)
+"""
 
-# Payment storage handler
+# Обработчик хранения платежей
 async def store_payment(req, bot_key):
     try:
         data = await req.json()
         payment_id = data.get("label")
         user_id = data.get("user_id")
         payment_type = data.get("payment_type", "unknown")
-        log.info(f"[{bot_key}] Storing payment: {payment_id} for user {user_id}")
+        log.info(f"[{bot_key}] Сохранение платежа: {payment_id} для пользователя {user_id}")
         if not payment_id or not user_id:
-            log.error(f"[{bot_key}] Missing payment data")
-            return web.Response(status=400, text="Incomplete data")
+            log.error(f"[{bot_key}] Неполные данные платежа")
+            return web.Response(status=400, text="Неполные данные")
 
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
@@ -526,23 +516,23 @@ async def store_payment(req, bot_key):
         )
         conn.commit()
         conn.close()
-        log.info(f"[{bot_key}] Stored payment: {payment_id}")
+        log.info(f"[{bot_key}] Платеж сохранен: {payment_id}")
         return web.Response(status=200)
     except Exception as e:
-        log.error(f"[{bot_key}] Payment storage error: {e}")
+        log.error(f"[{bot_key}] Ошибка сохранения платежа: {e}")
         return web.Response(status=500)
 
-# Health check handler
+# Проверка состояния
 async def check_status(req):
-    log.info(f"[{ENV}] Status check")
-    return web.Response(status=200, text=f"Active with {len(SETTINGS)} bots")
+    log.info(f"[{ENV}] Проверка состояния")
+    return web.Response(status=200, text=f"Активно с {len(SETTINGS)} ботами")
 
-# Bot webhook handler
+# Обработчик вебхука бота
 async def process_bot_webhook(req, bot_key):
     try:
         if bot_key not in dispatchers:
-            log.error(f"[{bot_key}] Invalid bot key")
-            return web.Response(status=400, text="Invalid bot")
+            log.error(f"[{bot_key}] Неверный ключ бота")
+            return web.Response(status=400, text="Неверный бот")
 
         bot = bot_instances[bot_key]
         dp = dispatchers[bot_key]
@@ -550,56 +540,54 @@ async def process_bot_webhook(req, bot_key):
         dp.set_current(dp)
 
         update = await req.json()
-        log.debug(f"[{bot_key}] Webhook data: {update}")
+        log.debug(f"[{bot_key}] Данные вебхука: {update}")
         update_obj = types.Update(**update)
         asyncio.create_task(dp.process_update(update_obj))
         return web.Response(status=200)
     except Exception as e:
-        log.error(f"[{bot_key}] Webhook error: {e}")
+        log.error(f"[{bot_key}] Ошибка вебхука: {e}")
         return web.Response(status=500)
 
-# Configure webhooks
+# Настройка вебхуков
 async def configure_webhooks():
-    log.info(f"Configuring webhooks for {len(SETTINGS)} bots")
+    log.info(f"Настройка вебхуков для {len(SETTINGS)} ботов")
     for bot_key in bot_instances:
         try:
             bot = bot_instances[bot_key]
             hook_url = f"{BASE_URL}{WEBHOOK_BASE}/{bot_key}"
             await bot.delete_webhook(drop_pending_updates=True)
             await bot.set_webhook(hook_url)
-            log.info(f"[{bot_key}] Webhook set: {hook_url}")
+            log.info(f"[{bot_key}] Вебхук установлен: {hook_url}")
         except Exception as e:
-            log.error(f"[{bot_key}] Webhook error: {e}")
+            log.error(f"[{bot_key}] Ошибка вебхука: {e}")
             sys.exit(1)
 
-# Initialize server
+# Запуск сервера
 async def launch_server():
     try:
         await configure_webhooks()
-        log.info("Starting server")
+        log.info("Запуск сервера")
         app = web.Application()
         app.router.add_post(YOOMONEY_HOOK, process_yoomoney_webhook)
         app.router.add_get(HEALTH_CHECK, check_status)
         app.router.add_post(HEALTH_CHECK, check_status)
         for bot_key in SETTINGS:
             app.router.add_post(f"{YOOMONEY_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_yoomoney_webhook(req))
-            app.router.add_post(f"{CRYPTO_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_crypto_webhook(req, bot_key))
-            app.router.add_post(f"{TON_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_ton_webhook(req, bot_key))
             app.router.add_post(f"{PAYMENT_STORE}/{bot_key}", lambda req, bot_key=bot_key: store_payment(req, bot_key))
             app.router.add_post(f"{WEBHOOK_BASE}/{bot_key}", lambda req, bot_key=bot_key: process_bot_webhook(req, bot_key))
-        log.info(f"Endpoints active: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {CRYPTO_HOOK}, {TON_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}")
+        log.info(f"Активные пути: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}")
 
         port = int(os.getenv("PORT", 8000))
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        log.info(f"Server running on port {port}")
+        log.info(f"Сервер запущен на порту {port}")
 
         while True:
             await asyncio.sleep(3600)
     except Exception as e:
-        log.error(f"Server error: {e}")
+        log.error(f"Ошибка сервера: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
