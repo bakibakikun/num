@@ -66,12 +66,12 @@ def setup_database():
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
         for bot_key in SETTINGS:
-            # Create table if not exists
+            # Create table with label, user_id, status, payment_type
             cursor.execute(
                 f"CREATE TABLE IF NOT EXISTS payments_{bot_key} "
-                "(label TEXT PRIMARY KEY, user_id TEXT, status TEXT, payment_type TEXT)"
+                "(label TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL, payment_type TEXT)"
             )
-            # Add payment_type column if missing
+            # Add payment_type column if missing (for compatibility)
             cursor.execute(
                 f"ALTER TABLE payments_{bot_key} ADD COLUMN IF NOT EXISTS payment_type TEXT"
             )
@@ -300,7 +300,7 @@ for bot_key, dp in dispatchers.items():
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("Pay via TON", url=pay_url))
             await bot.send_message(
-               April 11, 2025 at 10:03 AM                chat_id,
+                chat_id,
                 f"Pay {amount:.4f} TON via Telegram Wallet:",
                 reply_markup=keyboard
             )
