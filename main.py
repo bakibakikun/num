@@ -211,7 +211,7 @@ for bot_key, dp in dispatchers.items():
             else:
                 await bot.send_message(chat_id, f"{TON_ADDRESS}")
 
-            await bot.send_message(chat_id, f"Оплатите: {amount_ton} TON")
+            await bot.send_message(chat_id, f"Оплатите: {amount_ton:.4f} TON")
             log.info(f"[{bot_key}] Отправлен TON адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка TON: {e}")
@@ -228,7 +228,8 @@ for bot_key, dp in dispatchers.items():
 
             payment_id = str(uuid.uuid4())
             _, btc_price, _ = get_crypto_prices()
-            amount_btc = round(TARGET_PRICE_USD / btc_price, 8)
+            amount_btc = TARGET_PRICE_USD / btc_price
+            formatted_btc = f"{amount_btc:.8f}".rstrip("0")  # Формат 0.00010000 без лишних нулей
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
@@ -241,7 +242,7 @@ for bot_key, dp in dispatchers.items():
             conn.close()
             log.info(f"[{bot_key}] Сохранен BTC платеж {payment_id} для пользователя {user_id}")
 
-            qr_data = f"bitcoin:{BTC_ADDRESS}?amount={amount_btc}"
+            qr_data = f"bitcoin:{BTC_ADDRESS}?amount={formatted_btc}"
             qr_base64 = generate_qr_code(qr_data)
             if qr_base64:
                 qr_bytes = base64.b64decode(qr_base64)
@@ -249,7 +250,7 @@ for bot_key, dp in dispatchers.items():
             else:
                 await bot.send_message(chat_id, f"{BTC_ADDRESS}")
 
-            await bot.send_message(chat_id, f"Оплатите: {amount_btc} BTC")
+            await bot.send_message(chat_id, f"Оплатите: {formatted_btc} BTC")
             log.info(f"[{bot_key}] Отправлен BTC адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка BTC: {e}")
@@ -286,7 +287,7 @@ for bot_key, dp in dispatchers.items():
             else:
                 await bot.send_message(chat_id, f"{USDT_ADDRESS}")
 
-            await bot.send_message(chat_id, f"Оплатите: {amount_usdt} USDT TRC20")
+            await bot.send_message(chat_id, f"Оплатите: {amount_usdt:.2f} USDT TRC20")
             log.info(f"[{bot_key}] Отправлен USDT адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка USDT: {e}")
@@ -430,7 +431,7 @@ async def store_payment(req, bot_key):
         cursor.execute(
             f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT (label) DO UPDATE SET user_id = %s, status = %s",
-            (payment_id, user_id, "pending", "payment_type", user_id, "pending")
+            (payment_id, user_id, "pending", payment_type, user_id, "pending")
         )
         conn.commit()
         conn.close()
