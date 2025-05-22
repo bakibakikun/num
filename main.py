@@ -23,6 +23,7 @@ log.info("Запуск бота подписки")
 # Определение путей и базы данных
 PAYMENT_STORE = "/store_payment"
 YOOMONEY_HOOK = "/yoomoney_hook"
+COINREMITTER_HOOK = "/coinremitter_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
