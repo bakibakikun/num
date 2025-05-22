@@ -171,8 +171,8 @@ for bot_key, dp in dispatchers.items():
                 "amount": amount,
                 "fiat_currency": "RUB",
                 "currency": "TCN",
-                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}",  # Базовый URL без /bot_key
-                "name": f"Sub-{user_id[:4]}",  # Только латиница, цифры, дефис
+                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}",
+                "name": f"Sub-{user_id[:4]}",
                 "custom_data1": payment_id,
                 "expire_time_in_minutes": 30
             }
@@ -219,7 +219,7 @@ async def handle_root(req):
     return web.Response(status=200, text="OK")
 
 # Проверка вебхука ЮMoney
-def check_yoomoney_webhook(data, bot_key):
+def check_yoomoney_webhook(data, bppt_key):
     try:
         cfg = SETTINGS[bot_key]
         params = [
@@ -343,7 +343,7 @@ async def process_coinremitter_webhook(req, bot_key=None):
             log.info(f"[{bot_key or 'general'}] Вебхук Coinremitter: {data}")
         except Exception as e:
             log.warning(f"[{bot_key or 'general'}] Пустой или некорректный JSON в вебхуке Coinremitter: {e}")
-            return web.Response(status=200, text="OK")  # Возвращаем 200 для тестовых запросов
+            return web.json_response({"status": "OK"}, status=200)  # JSON-ответ для тестов
 
         payment_id = data.get("custom_data1")
         status = data.get("status")
@@ -382,10 +382,10 @@ async def process_coinremitter_webhook(req, bot_key=None):
             else:
                 log.error(f"[{bot_key}] Платеж {payment_id} не найден")
             conn.close()
-        return web.Response(status=200)
+        return web.json_response({"status": "OK"}, status=200)
     except Exception as e:
         log.error(f"[{bot_key or 'general'}] Ошибка вебхука Coinremitter: {e}")
-        return web.Response(status=200)  # Возвращаем 200 для валидации
+        return web.json_response({"status": "OK"}, status=200)
 
 # Обработчик хранения платежей
 async def store_payment(req, bot_key):
@@ -460,7 +460,7 @@ async def launch_server():
         await configure_webhooks()
         log.info("Запуск сервера")
         app = web.Application()
-        app.router.add_post("/", handle_root)  # Временный маршрут для /
+        app.router.add_post("/", handle_root)
         app.router.add_post(YOOMONEY_HOOK, process_yoomoney_webhook)
         app.router.add_post(COINREMITTER_HOOK, process_coinremitter_webhook)
         app.router.add_get(HEALTH_CHECK, check_status)
