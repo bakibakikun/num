@@ -172,7 +172,7 @@ for bot_key, dp in dispatchers.items():
                 "fiat_currency": "RUB",
                 "currency": "TCN",
                 "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}/{bot_key}",
-                "name": f"Подписка пользователя {user_id}",
+                "name": f"Подписка {user_id[:4]}",  # Ограничено до 15 символов
                 "custom_data1": payment_id,
                 "expire_time_in_minutes": 30
             }
