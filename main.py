@@ -4,10 +4,8 @@ import uuid
 import psycopg2
 import hashlib
 import requests
-import qrcode
-from io import BytesIO
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 from urllib.parse import urlencode
 import asyncio
@@ -32,13 +30,12 @@ WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN", "403077:AANqFinpBzrjznz9XSxj4f9vQZzmnsm1sf8")
-METAMASK_ADDRESS = "0xYourMetaMaskAddress"  # Замени на свой TCN-адрес
 
 # Окружение
 ENV = "koyeb"
 log.info(f"Платформа: {ENV}")
 
-# Загрузка конфиURAций ботов
+# Загрузка конфигураций ботов
 SETTINGS = fetch_bot_settings()
 log.info(f"Настройка {len(SETTINGS)} ботов")
 bot_instances = {}
@@ -81,7 +78,6 @@ def create_payment_buttons(user_id, price):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("ЮMoney", callback_data=f"yoomoney_{user_id}"))
     keyboard.add(InlineKeyboardButton("TON", callback_data=f"crypto_bot_{user_id}"))
-    keyboard.add(InlineKeyboardButton("MetaMask (TCN)", callback_data=f"metamask_{user_id}"))
     return keyboard
 
 # Обработчики команд
@@ -105,31 +101,6 @@ for bot_key, dp in dispatchers.items():
             log.info(f"[{bot_key}] Отправлены варианты оплаты пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка /start: {e}")
-            await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
-
-    @dp.message_handler(commands=["confirm_payment"])
-    async def confirm_payment(msg: types.Message, bot_key=bot_key):
-        try:
-            user_id = str(msg.from_user.id)
-            chat_id = msg.chat.id
-            bot = bot_instances[bot_key]
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor()
-            cursor.execute(
-                f"UPDATE payments_{bot_key} SET status = %s WHERE user_id = %s AND payment_type = %s AND status = %s",
-                ("success", user_id, "metamask_tcn", "pending")
-            )
-            conn.commit()
-            conn.close()
-            invite = await generate_channel_invite(bot_key, user_id)
-            if invite:
-                await bot.send_message(chat_id, f"Платеж подтвержден! Присоединяйтесь: {invite}")
-                log.info(f"[{bot_key}] Подтвержден MetaMask платеж для пользователя {user_id}")
-            else:
-                await bot.send_message(chat_id, "Ошибка приглашения. Свяжитесь с @YourSupportHandle.")
-                log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
-        except Exception as e:
-            log.error(f"[{bot_key}] Ошибка подтверждения платежа: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
 
     @dp.callback_query_handler(lambda c: c.data.startswith("yoomoney_"))
@@ -196,7 +167,7 @@ for bot_key, dp in dispatchers.items():
                 "https://pay.crypt.bot/api/createInvoice",
                 json={
                     "amount": amount_ton,
-                    "currency": "TON",
+                    "asset": "TON",
                     "description": f"Подписка пользователя {user_id}",
                     "payload": payment_id
                 },
@@ -232,49 +203,6 @@ for bot_key, dp in dispatchers.items():
             log.info(f"[{bot_key}] Отправлена ссылка TON пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка TON платежа: {e}")
-            await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
-
-    @dp.callback_query_handler(lambda c: c.data.startswith("metamask_"))
-    async def handle_metamask_payment(cb: types.CallbackQuery, bot_key=bot_key):
-        try:
-            user_id = cb.data.split("_")[1]
-            chat_id = cb.message.chat.id
-            bot = bot_instances[bot_key]
-            await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] Выбран MetaMask (TCN) пользователем {user_id}")
-
-            amount_tcn = 0.003  # ~3 RUB
-            uri = f"binance:{METAMASK_ADDRESS}?amount={amount_tcn}"
-
-            qr = qrcode.QRCode()
-            qr.add_data(uri)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buf = BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-
-            payment_id = str(uuid.uuid4())
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor()
-            cursor.execute(
-                f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
-                "VALUES (%s, %s, %s, %s)",
-                (payment_id, user_id, "pending", "metamask_tcn")
-            )
-            conn.commit()
-            conn.close()
-            log.info(f"[{bot_key}] Сохранен MetaMask платеж {payment_id} для пользователя {user_id}")
-
-            await bot.send_photo(
-                chat_id,
-                InputFile(buf, filename="payment_qr.png"),
-                caption=f"Оплатите {amount_tcn} TCN на адрес: {METAMASK_ADDRESS}\n"
-                        "После оплаты напишите /confirm_payment или свяжитесь с @YourSupportHandle."
-            )
-            log.info(f"[{bot_key}] Отправлен QR-код MetaMask пользователю {user_id}")
-        except Exception as e:
-            log.error(f"[{bot_key}] Ошибка MetaMask платежа: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
 # Временный обработчик корневого пути
