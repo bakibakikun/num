@@ -171,7 +171,7 @@ for bot_key, dp in dispatchers.items():
                 "amount": amount,
                 "fiat_currency": "RUB",
                 "currency": "TCN",
-                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}",
+                "notify_url": "https://short-blinnie-bakibakikun-a88f041b.koyeb.app/coinremitter_hook",
                 "name": f"Sub-{user_id[:4]}",
                 "custom_data1": payment_id,
                 "expire_time_in_minutes": 30
