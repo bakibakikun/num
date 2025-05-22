@@ -34,11 +34,20 @@ HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koy
 TON_ADDRESS = "UQBLNUOpN5B0q_M2xukAB5MsfSCUsdE6BkXHO6ndogQDi5_6"
 BTC_ADDRESS = "bc1q5xq9m473r8nnkx799ztcrwfqs0555fs3ulw9vr"
 USDT_ADDRESS = "TQzs3V6QHdXb3CtNPYK9iPWuvvrYCPt6vE"
-TARGET_PRICE_USD = 6.0  # Цена в USD
 
 # Окружение
-ENV = "koyeb"
+ENV = "vercel"
 log.info(f"Платформа: {ENV}")
+
+# Конвертация RUB в USD
+def get_usd_from_rub(rub_amount):
+    try:
+        # Можно заменить на API, например: requests.get("https://api.exchangerate-api.com/v4/latest/RUB")
+        usd_rate = 100.0  # Фиксированный курс: 1 USD = 100 RUB
+        return rub_amount / usd_rate
+    except Exception as e:
+        log.error(f"Ошибка конвертации RUB в USD: {e}")
+        return rub_amount / 100.0  # Fallback
 
 # Получение курса криптовалют
 def get_crypto_prices():
@@ -126,10 +135,10 @@ for bot_key, dp in dispatchers.items():
             log.info(f"[{bot_key}] Команда /start от пользователя {user_id}")
 
             keyboard = create_payment_buttons(user_id)
-            welcome_msg = cfg["DESCRIPTION"].format(price=TARGET_PRICE_USD)
+            welcome_msg = cfg["DESCRIPTION"].format(price=cfg["PRICE"])
             await bot.send_message(
                 chat_id,
-                f"{welcome_msg}\n\nВыберите способ оплаты для {TARGET_PRICE_USD} USD:",
+                f"{welcome_msg}\n\nВыберите способ оплаты для {cfg['PRICE']} RUB:",
                 reply_markup=keyboard
             )
             log.info(f"[{bot_key}] Отправлены варианты оплаты пользователю {user_id}")
@@ -152,7 +161,7 @@ for bot_key, dp in dispatchers.items():
                 "quickpay-form": "shop",
                 "paymentType": "AC",
                 "targets": f"Подписка пользователя {user_id}",
-                "sum": TARGET_PRICE_USD,
+                "sum": cfg["PRICE"],  # В RUB
                 "label": payment_id,
                 "receiver": cfg["YOOMONEY_WALLET"],
                 "successURL": f"https://t.me/{(await bot.get_me()).username}"
@@ -184,12 +193,14 @@ for bot_key, dp in dispatchers.items():
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
+            cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
             log.info(f"[{bot_key}] Выбран TON пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
             ton_price, _, _ = get_crypto_prices()
-            amount_ton = round(TARGET_PRICE_USD / ton_price, 4)
+            usd_amount = get_usd_from_rub(cfg["PRICE"])  # RUB в USD
+            amount_ton = round(usd_amount / ton_price, 4)
             nano_ton = int(amount_ton * 1e9)  # TON в наноTON для QR
 
             conn = psycopg2.connect(DB_URL)
@@ -223,13 +234,15 @@ for bot_key, dp in dispatchers.items():
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
+            cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
             log.info(f"[{bot_key}] Выбран BTC пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
             _, btc_price, _ = get_crypto_prices()
-            amount_btc = TARGET_PRICE_USD / btc_price
-            formatted_btc = f"{amount_btc:.8f}".rstrip("0")  # Формат 0.00010000 без лишних нулей
+            usd_amount = get_usd_from_rub(cfg["PRICE"])  # RUB в USD
+            amount_btc = usd_amount / btc_price
+            formatted_btc = f"{amount_btc:.8f}".rstrip("0")  # Формат 0.00010000
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
@@ -262,12 +275,14 @@ for bot_key, dp in dispatchers.items():
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
+            cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
             log.info(f"[{bot_key}] Выбран USDT TRC20 пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
             _, _, usdt_price = get_crypto_prices()
-            amount_usdt = round(TARGET_PRICE_USD / usdt_price, 2)
+            usd_amount = get_usd_from_rub(cfg["PRICE"])  # RUB в USD
+            amount_usdt = round(usd_amount / usdt_price, 2)
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
