@@ -3,6 +3,7 @@ import sys
 import uuid
 import psycopg2
 import hashlib
+import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -27,7 +28,7 @@ COINREMITTER_HOOK = "/coinremitter_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
-BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
+HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
 COINREMITTER_API_KEY_TCN = os.getenv("COINREMITTER_API_KEY_TCN", "wkey_pyCGnCVlrawGdKl")
 COINREMITTER_PASSWORD_TCN = os.getenv("COINREMITTER_PASSWORD_TCN", "Lemon333")
 
@@ -336,8 +337,14 @@ async def process_yoomoney_webhook(req):
 # Обработчик вебхука Coinremitter
 async def process_coinremitter_webhook(req, bot_key=None):
     try:
-        data = await req.json()
-        log.info(f"[{bot_key or 'general'}] Вебхук Coinremitter: {data}")
+        # Проверяем, есть ли тело запроса
+        try:
+            data = await req.json()
+            log.info(f"[{bot_key or 'general'}] Вебхук Coinremitter: {data}")
+        except Exception as e:
+            log.warning(f"[{bot_key or 'general'}] Пустой или некорректный JSON в вебхуке Coinremitter: {e}")
+            return web.Response(status=200, text="OK")  # Возвращаем 200 для тестовых запросов
+
         payment_id = data.get("custom_data1")
         status = data.get("status")
         currency = data.get("coin_short_name", "unknown").lower()
