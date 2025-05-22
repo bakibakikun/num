@@ -30,6 +30,7 @@ WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN", "403077:AANqFinpBzrjznz9XSxj4f9vQZzmnsm1sf8")
+PAYPAL_EMAIL = "твой@email.com"  # Замени на твой PayPal email
 
 # Окружение
 ENV = "koyeb"
@@ -77,7 +78,7 @@ setup_database()
 def create_payment_buttons(user_id, price):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("ЮMoney", callback_data=f"yoomoney_{user_id}"))
-    keyboard.add(InlineKeyboardButton("TON", callback_data=f"crypto_bot_{user_id}"))
+    keyboard.add(InlineKeyboardButton("PayPal", callback_data=f"paypal_{user_id}"))
     return keyboard
 
 # Обработчики команд
@@ -144,65 +145,40 @@ for bot_key, dp in dispatchers.items():
             log.error(f"[{bot_key}] Ошибка ЮMoney: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
-    @dp.callback_query_handler(lambda c: c.data.startswith("crypto_bot_"))
-    async def handle_crypto_bot_payment(cb: types.CallbackQuery, bot_key=bot_key):
+    @dp.callback_query_handler(lambda c: c.data.startswith("paypal_"))
+    async def handle_paypal_choice(cb: types.CallbackQuery, bot_key=bot_key):
         try:
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
             cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] Выбран TON (CryptoBot) пользователем {user_id}")
-
-            if not CRYPTO_BOT_TOKEN:
-                log.error(f"[{bot_key}] Отсутствует токен CryptoBot")
-                await bot.send_message(chat_id, "TON не настроен. Выберите другой способ.")
-                return
+            log.info(f"[{bot_key}] Выбран PayPal пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
-            amount_ton = 0.1  # ~3 RUB
-            log.info(f"[{bot_key}] Создание TON инвойса: amount={amount_ton} TON")
-
-            response = requests.post(
-                "https://pay.crypt.bot/api/createInvoice",
-                json={
-                    "amount": amount_ton,
-                    "asset": "TON",
-                    "description": f"Подписка пользователя {user_id}",
-                    "payload": payment_id
-                },
-                headers={"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
-            )
-            result = response.json()
-            if not result.get("ok"):
-                log.error(f"[{bot_key}] Ошибка создания TON инвойса: {result}")
-                await bot.send_message(chat_id, "Ошибка создания платежа. Попробуйте снова.")
-                return
-
-            invoice_url = result["result"]["payUrl"]
-            log.info(f"[{bot_key}] TON инвойс создан: {invoice_url}")
+            paypal_link = f"https://www.paypal.com/myaccount/transfer/send?recipient={PAYPAL_EMAIL}"
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
                 f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
                 "VALUES (%s, %s, %s, %s)",
-                (payment_id, user_id, "pending", "crypto_bot_ton")
+                (payment_id, user_id, "pending", "paypal")
             )
             conn.commit()
             conn.close()
-            log.info(f"[{bot_key}] Сохранен TON платеж {payment_id} для пользователя {user_id}")
+            log.info(f"[{bot_key}] Сохранен PayPal платеж {payment_id} для пользователя {user_id}")
 
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Оплатить через TON", url=invoice_url))
+            keyboard.add(InlineKeyboardButton("Оплатить через PayPal", url=paypal_link))
             await bot.send_message(
                 chat_id,
-                f"Оплатите {amount_ton} TON:\nПлатеж будет подтвержден автоматически.",
+                f"Оплатите {cfg['PRICE']} USD через PayPal:\nВыберите 'Friends and Family' и отправьте на {PAYPAL_EMAIL}.",
                 reply_markup=keyboard
             )
-            log.info(f"[{bot_key}] Отправлена ссылка TON пользователю {user_id}")
+            log.info(f"[{bot_key}] Отправлена PayPal ссылка пользователю {user_id}")
         except Exception as e:
-            log.error(f"[{bot_key}] Ошибка TON платежа: {e}")
+            log.error(f"[{bot_key}] Ошибка PayPal: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
 # Временный обработчик корневого пути
@@ -326,59 +302,6 @@ async def process_yoomoney_webhook(req):
         log.error(f"[{ENV}] Ошибка вебхука ЮMoney: {e}")
         return web.Response(status=500)
 
-# Обработчик вебхука CryptoBot
-async def process_crypto_bot_webhook(req, bot_key=None):
-    try:
-        data = await req.json()
-        log.info(f"[{bot_key or 'general'}] Вебхук CryptoBot: {data}")
-
-        update_type = data.get("type")
-        if update_type != "invoice_paid":
-            log.info(f"[{bot_key or 'general'}] Игнорируем вебхук: {update_type}")
-            return web.json_response({"ok": True}, status=200)
-
-        payment_id = data.get("payload")
-        status = data.get("status")
-        currency = data.get("currency", "unknown").lower()
-        if not payment_id or not status:
-            log.error(f"[{bot_key or 'general'}] Отсутствуют данные CryptoBot")
-            return web.Response(status=400, text="Отсутствуют данные")
-
-        if not bot_key:
-            bot_key = locate_bot_by_payment(payment_id)
-            if not bot_key:
-                log.error(f"[{bot_key or 'general'}] Бот не найден для платежа {payment_id}")
-                return web.Response(status=400, text="Бот не найден")
-
-        if status.lower() == "paid":
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT user_id FROM payments_{bot_key} WHERE label = %s", (payment_id,))
-            result = cursor.fetchone()
-            if result:
-                user_id = result[0]
-                cursor.execute(
-                    f"UPDATE payments_{bot_key} SET status = %s WHERE label = %s",
-                    ("success", payment_id)
-                )
-                conn.commit()
-                bot = bot_instances[bot_key]
-                await bot.send_message(user_id, f"Платеж TON ({currency.upper()}) подтвержден!")
-                invite = await generate_channel_invite(bot_key, user_id)
-                if invite:
-                    await bot.send_message(user_id, f"Присоединяйтесь к каналу: {invite}")
-                    log.info(f"[{bot_key}] TON платеж {payment_id} ({currency.upper()}) обработан для пользователя {user_id}")
-                else:
-                    await bot.send_message(user_id, "Ошибка приглашения. Свяжитесь с @YourSupportHandle.")
-                    log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
-            else:
-                log.error(f"[{bot_key}] Платеж {payment_id} не найден")
-            conn.close()
-        return web.json_response({"ok": True}, status=200)
-    except Exception as e:
-        log.error(f"[{bot_key or 'general'}] Ошибка вебхука CryptoBot: {e}")
-        return web.json_response({"ok": True}, status=200)
-
 # Обработчик хранения платежей
 async def store_payment(req, bot_key):
     try:
@@ -443,7 +366,7 @@ async def configure_webhooks():
             await bot.set_webhook(hook_url)
             log.info(f"[{bot_key}] Вебхук установлен: {hook_url}")
         except Exception as e:
-            log.error(f"[{bot_key}] Ошибка вебхука: {e}")
+            logIDAerror(f"[{bot_key}] Ошибка вебхука: {e}")
             sys.exit(1)
 
 # Запуск сервера
@@ -454,15 +377,13 @@ async def launch_server():
         app = web.Application()
         app.router.add_post("/", handle_root)
         app.router.add_post(YOOMONEY_HOOK, process_yoomoney_webhook)
-        app.router.add_post(CRYPTO_BOT_HOOK, process_crypto_bot_webhook)
         app.router.add_get(HEALTH_CHECK, check_status)
         app.router.add_post(HEALTH_CHECK, check_status)
         for bot_key in SETTINGS:
             app.router.add_post(f"{YOOMONEY_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_yoomoney_webhook(req))
-            app.router.add_post(f"{CRYPTO_BOT_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_crypto_bot_webhook(req, bot_key=bot_key))
             app.router.add_post(f"{PAYMENT_STORE}/{bot_key}", lambda req, bot_key=bot_key: store_payment(req, bot_key))
             app.router.add_post(f"{WEBHOOK_BASE}/{bot_key}", lambda req, bot_key=bot_key: process_bot_webhook(req, bot_key))
-        log.info(f"Активные пути: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {CRYPTO_BOT_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}, /")
+        log.info(f"Активные пути: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}, /")
 
         port = int(os.getenv("PORT", 8000))
         runner = web.AppRunner(app)
