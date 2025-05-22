@@ -28,13 +28,8 @@ HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-# Конфигурация Coinremitter
-COINREMITTER_CONFIG = {
-    "TCN": {
-        "API_KEY": os.getenv("wkey_pyCGnCVlrawGdKl"),
-        "PASSWORD": os.getenv("Lemon333")
-    }
-}
+COINREMITTER_API_KEY_TCN = os.getenv("COINREMITTER_API_KEY_TCN", "wkey_pyCGnCVlrawGdKl")
+COINREMITTER_PASSWORD_TCN = os.getenv("COINREMITTER_PASSWORD_TCN", "Lemon333")
 
 # Окружение
 ENV = "koyeb"
@@ -156,34 +151,32 @@ for bot_key, dp in dispatchers.items():
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
             cfg = SETTINGS[bot_key]
-            currency = "TCN"  # Пока только TCN
             await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] Выбран Coinremitter ({currency}) пользователем {user_id}")
+            log.info(f"[{bot_key}] Выбран Coinremitter (TCN) пользователем {user_id}")
 
-            coin_config = COINREMITTER_CONFIG.get(currency)
-            if not coin_config or not coin_config["API_KEY"] or not coin_config["PASSWORD"]:
-                log.error(f"[{bot_key}] Отсутствуют ключи Coinremitter для {currency}")
+            if not COINREMITTER_API_KEY_TCN or not COINREMITTER_PASSWORD_TCN:
+                log.error(f"[{bot_key}] Отсутствуют ключи Coinremitter для TCN")
                 await bot.send_message(chat_id, "Coinremitter не настроен. Выберите другой способ.")
                 return
 
             payment_id = str(uuid.uuid4())
             amount = cfg["PRICE"]
-            log.info(f"[{bot_key}] Создание Coinremitter инвойса: amount={amount}, currency=RUB, coin={currency}")
+            log.info(f"[{bot_key}] Создание Coinremitter инвойса: amount={amount}, currency=RUB, coin=TCN")
 
             headers = {"Accept": "application/json"}
             payload = {
-                "api_key": coin_config["API_KEY"],
-                "password": coin_config["PASSWORD"],
+                "api_key": COINREMITTER_API_KEY_TCN,
+                "password": COINREMITTER_PASSWORD_TCN,
                 "amount": amount,
                 "fiat_currency": "RUB",
-                "currency": currency,
-                "notify_url": f"{BASE_URL}{COINREMITTER_HOOK}/{bot_key}",
+                "currency": "TCN",
+                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}/{bot_key}",
                 "name": f"Подписка пользователя {user_id}",
                 "custom_data1": payment_id,
                 "expire_time_in_minutes": 30
             }
             response = requests.post(
-                f"https://coinremitter.com/api/v3/{currency}/create-invoice",
+                "https://coinremitter.com/api/v3/TCN/create-invoice",
                 headers=headers,
                 data=payload
             )
@@ -201,7 +194,7 @@ for bot_key, dp in dispatchers.items():
             cursor.execute(
                 f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
                 "VALUES (%s, %s, %s, %s)",
-                (payment_id, user_id, "pending", f"coinremitter_{currency.lower()}")
+                (payment_id, user_id, "pending", "coinremitter_tcn")
             )
             conn.commit()
             conn.close()
@@ -211,10 +204,10 @@ for bot_key, dp in dispatchers.items():
             keyboard.add(InlineKeyboardButton("Оплатить через криптовалюту", url=invoice_url))
             await bot.send_message(
                 chat_id,
-                f"Оплатите через криптовалюту ({currency} для теста):\nПлатеж будет подтвержден автоматически.",
+                "Оплатите через криптовалюту (TCN для теста):\nПлатеж будет подтвержден автоматически.",
                 reply_markup=keyboard
             )
-            log.info(f"[{bot_key}] Отправлена ссылка Coinremitter ({currency}) пользователю {user_id}")
+            log.info(f"[{bot_key}] Отправлена ссылка Coinremitter (TCN) пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка Coinremitter платежа: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
@@ -446,7 +439,7 @@ async def configure_webhooks():
     for bot_key in bot_instances:
         try:
             bot = bot_instances[bot_key]
-            hook_url = f"{BASE_URL}{WEBHOOK_BASE}/{bot_key}"
+            hook_url = f"{HOST_URL}{WEBHOOK_BASE}/{bot_key}"
             await bot.delete_webhook(drop_pending_updates=True)
             await bot.set_webhook(hook_url)
             log.info(f"[{bot_key}] Вебхук установлен: {hook_url}")
