@@ -31,8 +31,8 @@ BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koy
 # Конфигурация Coinremitter
 COINREMITTER_CONFIG = {
     "TCN": {
-        "API_KEY": os.getenv("COINREMITTER_API_KEY_TCN"),
-        "PASSWORD": os.getenv("COINREMITTER_PASSWORD_TCN")
+        "API_KEY": os.getenv("wkey_pyCGnCVlrawGdKl"),
+        "PASSWORD": os.getenv("Lemon333")
     }
 }
 
