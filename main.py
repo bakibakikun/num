@@ -10,6 +10,9 @@ from aiohttp import web
 from urllib.parse import urlencode
 import asyncio
 import os
+import qrcode
+import base64
+from io import BytesIO
 from config import fetch_bot_settings
 
 # Настройка логирования
@@ -24,17 +27,45 @@ log.info("Запуск бота подписки")
 # Определение путей и базы данных
 PAYMENT_STORE = "/store_payment"
 YOOMONEY_HOOK = "/yoomoney_hook"
-CRYPTO_BOT_HOOK = "/crypto_bot_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN", "403077:AANqFinpBzrjznz9XSxj4f9vQZzmnsm1sf8")
-PAYPAL_EMAIL = "твой@email.com"  # Замени на твой PayPal email
+TON_ADDRESS = "UQBLNUOpN5B0q_M2xukAB5MsfSCUsdE6BkXHO6ndogQDi5_6"
+BTC_ADDRESS = "bc1q5xq9m473r8nnkx799ztcrwfqs0555fs3ulw9vr"
+USDT_ADDRESS = "TQzs3V6QHdXb3CtNPYK9iPWuvvrYCPt6vE"
+TARGET_PRICE_USD = 6.0  # Цена в USD
 
 # Окружение
 ENV = "koyeb"
 log.info(f"Платформа: {ENV}")
+
+# Получение курса криптовалют
+def get_crypto_prices():
+    try:
+        response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network,bitcoin,tether&vs_currencies=usd")
+        data = response.json()
+        ton_price = data["the-open-network"]["usd"]
+        btc_price = data["bitcoin"]["usd"]
+        usdt_price = data["tether"]["usd"]
+        return ton_price, btc_price, usdt_price
+    except Exception as e:
+        log.error(f"Ошибка получения курса: {e}")
+        return 5.0, 80000.0, 1.0  # Fallback: 1 TON = 5 USD, 1 BTC = 80,000 USD, 1 USDT = 1 USD
+
+# Генерация QR-кода
+def generate_qr_code(address):
+    try:
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(address)
+        qr.make(fit=True)
+        img = qr.make_image(fill="black", back_color="white")
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode()
+    except Exception as e:
+        log.error(f"Ошибка генерации QR-кода: {e}")
+        return None
 
 # Загрузка конфигураций ботов
 SETTINGS = fetch_bot_settings()
@@ -75,10 +106,12 @@ def setup_database():
 setup_database()
 
 # Кнопки оплаты
-def create_payment_buttons(user_id, price):
+def create_payment_buttons(user_id):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("ЮMoney", callback_data=f"yoomoney_{user_id}"))
-    keyboard.add(InlineKeyboardButton("PayPal", callback_data=f"paypal_{user_id}"))
+    keyboard.add(InlineKeyboardButton("TON", callback_data=f"ton_{user_id}"))
+    keyboard.add(InlineKeyboardButton("BTC", callback_data=f"btc_{user_id}"))
+    keyboard.add(InlineKeyboardButton("USDT TRC20", callback_data=f"usdt_{user_id}"))
     return keyboard
 
 # Обработчики команд
@@ -92,11 +125,11 @@ for bot_key, dp in dispatchers.items():
             cfg = SETTINGS[bot_key]
             log.info(f"[{bot_key}] Команда /start от пользователя {user_id}")
 
-            keyboard = create_payment_buttons(user_id, cfg["PRICE"])
-            welcome_msg = cfg["DESCRIPTION"].format(price=cfg["PRICE"])
+            keyboard = create_payment_buttons(user_id)
+            welcome_msg = cfg["DESCRIPTION"].format(price=TARGET_PRICE_USD)
             await bot.send_message(
                 chat_id,
-                f"{welcome_msg}\n\nВыберите способ оплаты для {cfg['PRICE']} RUB:",
+                f"{welcome_msg}\n\nВыберите способ оплаты для {TARGET_PRICE_USD} USD:",
                 reply_markup=keyboard
             )
             log.info(f"[{bot_key}] Отправлены варианты оплаты пользователю {user_id}")
@@ -119,7 +152,7 @@ for bot_key, dp in dispatchers.items():
                 "quickpay-form": "shop",
                 "paymentType": "AC",
                 "targets": f"Подписка пользователя {user_id}",
-                "sum": cfg["PRICE"],
+                "sum": TARGET_PRICE_USD,
                 "label": payment_id,
                 "receiver": cfg["YOOMONEY_WALLET"],
                 "successURL": f"https://t.me/{(await bot.get_me()).username}"
@@ -145,41 +178,135 @@ for bot_key, dp in dispatchers.items():
             log.error(f"[{bot_key}] Ошибка ЮMoney: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
-    @dp.callback_query_handler(lambda c: c.data.startswith("paypal_"))
-    async def handle_paypal_choice(cb: types.CallbackQuery, bot_key=bot_key):
+    @dp.callback_query_handler(lambda c: c.data.startswith("ton_"))
+    async def handle_ton_choice(cb: types.CallbackQuery, bot_key=bot_key):
         try:
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
-            cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] Выбран PayPal пользователем {user_id}")
+            log.info(f"[{bot_key}] Выбран TON пользователем {user_id}")
 
             payment_id = str(uuid.uuid4())
-            paypal_link = f"https://www.paypal.com/myaccount/transfer/send?recipient={PAYPAL_EMAIL}"
+            ton_price, _, _ = get_crypto_prices()
+            amount_ton = round(TARGET_PRICE_USD / ton_price, 4)
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
                 f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
                 "VALUES (%s, %s, %s, %s)",
-                (payment_id, user_id, "pending", "paypal")
+                (payment_id, user_id, "pending", "ton")
             )
             conn.commit()
             conn.close()
-            log.info(f"[{bot_key}] Сохранен PayPal платеж {payment_id} для пользователя {user_id}")
+            log.info(f"[{bot_key}] Сохранен TON платеж {payment_id} для пользователя {user_id}")
+
+            qr_base64 = generate_qr_code(TON_ADDRESS)
+            if qr_base64:
+                qr_bytes = base64.b64decode(qr_base64)
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_ton} TON\nАдрес: {TON_ADDRESS}")
+            else:
+                await bot.send_message(chat_id, f"Оплатите {amount_ton} TON\nАдрес: {TON_ADDRESS}")
 
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Оплатить через PayPal", url=paypal_link))
-            await bot.send_message(
-                chat_id,
-                f"Оплатите {cfg['PRICE']} USD через PayPal:\nВыберите 'Friends and Family' и отправьте на {PAYPAL_EMAIL}.",
-                reply_markup=keyboard
-            )
-            log.info(f"[{bot_key}] Отправлена PayPal ссылка пользователю {user_id}")
+            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_ton_{TON_ADDRESS}"))
+            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
+            log.info(f"[{bot_key}] Отправлен TON адрес пользователю {user_id}")
         except Exception as e:
-            log.error(f"[{bot_key}] Ошибка PayPal: {e}")
+            log.error(f"[{bot_key}] Ошибка TON: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
+
+    @dp.callback_query_handler(lambda c: c.data.startswith("btc_"))
+    async def handle_btc_choice(cb: types.CallbackQuery, bot_key=bot_key):
+        try:
+            user_id = cb.data.split("_")[1]
+            chat_id = cb.message.chat.id
+            bot = bot_instances[bot_key]
+            await bot.answer_callback_query(cb.id)
+            log.info(f"[{bot_key}] Выбран BTC пользователем {user_id}")
+
+            payment_id = str(uuid.uuid4())
+            _, btc_price, _ = get_crypto_prices()
+            amount_btc = round(TARGET_PRICE_USD / btc_price, 8)
+
+            conn = psycopg2.connect(DB_URL)
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
+                "VALUES (%s, %s, %s, %s)",
+                (payment_id, user_id, "pending", "btc")
+            )
+            conn.commit()
+            conn.close()
+            log.info(f"[{bot_key}] Сохранен BTC платеж {payment_id} для пользователя {user_id}")
+
+            qr_base64 = generate_qr_code(BTC_ADDRESS)
+            if qr_base64:
+                qr_bytes = base64.b64decode(qr_base64)
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_btc} BTC\nАдрес: {BTC_ADDRESS}")
+            else:
+                await bot.send_message(chat_id, f"Оплатите {amount_btc} BTC\nАдрес: {BTC_ADDRESS}")
+
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_btc_{BTC_ADDRESS}"))
+            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
+            log.info(f"[{bot_key}] Отправлен BTC адрес пользователю {user_id}")
+        except Exception as e:
+            log.error(f"[{bot_key}] Ошибка BTC: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
+
+    @dp.callback_query_handler(lambda c: c.data.startswith("usdt_"))
+    async def handle_usdt_choice(cb: types.CallbackQuery, bot_key=bot_key):
+        try:
+            user_id = cb.data.split("_")[1]
+            chat_id = cb.message.chat.id
+            bot = bot_instances[bot_key]
+            await bot.answer_callback_query(cb.id)
+            log.info(f"[{bot_key}] Выбран USDT TRC20 пользователем {user_id}")
+
+            payment_id = str(uuid.uuid4())
+            _, _, usdt_price = get_crypto_prices()
+            amount_usdt = round(TARGET_PRICE_USD / usdt_price, 2)
+
+            conn = psycopg2.connect(DB_URL)
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
+                "VALUES (%s, %s, %s, %s)",
+                (payment_id, user_id, "pending", "usdt")
+            )
+            conn.commit()
+            conn.close()
+            log.info(f"[{bot_key}] Сохранен USDT платеж {payment_id} для пользователя {user_id}")
+
+            qr_base64 = generate_qr_code(USDT_ADDRESS)
+            if qr_base64:
+                qr_bytes = base64.b64decode(qr_base64)
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_usdt} USDT TRC20\nАдрес: {USDT_ADDRESS}")
+            else:
+                await bot.send_message(chat_id, f"Оплатите {amount_usdt} USDT TRC20\nАдрес: {USDT_ADDRESS}")
+
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_usdt_{USDT_ADDRESS}"))
+            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
+            log.info(f"[{bot_key}] Отправлен USDT адрес пользователю {user_id}")
+        except Exception as e:
+            log.error(f"[{bot_key}] Ошибка USDT: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
+
+    @dp.callback_query_handler(lambda c: c.data.startswith(("copy_ton_", "copy_btc_", "copy_usdt_")))
+    async def handle_copy_address(cb: types.CallbackQuery, bot_key=bot_key):
+        try:
+            address = cb.data.split("_", 2)[2]
+            chat_id = cb.message.chat.id
+            bot = bot_instances[bot_key]
+            await bot.answer_callback_query(cb.id, text="Адрес скопирован!")
+            await bot.send_message(chat_id, f"Скопирован адрес:\n```{address}```")
+            log.info(f"[{bot_key}] Скопирован адрес {address} для пользователя {cb.from_user.id}")
+        except Exception as e:
+            log.error(f"[{bot_key}] Ошибка копирования адреса: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
 
 # Временный обработчик корневого пути
 async def handle_root(req):
@@ -366,7 +493,7 @@ async def configure_webhooks():
             await bot.set_webhook(hook_url)
             log.info(f"[{bot_key}] Вебхук установлен: {hook_url}")
         except Exception as e:
-            logIDAerror(f"[{bot_key}] Ошибка вебхука: {e}")
+            log.error(f"[{bot_key}] Ошибка вебхука: {e}")
             sys.exit(1)
 
 # Запуск сервера
