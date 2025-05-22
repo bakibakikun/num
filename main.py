@@ -171,7 +171,7 @@ for bot_key, dp in dispatchers.items():
                 "amount": amount,
                 "fiat_currency": "RUB",
                 "currency": "TCN",
-                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}/{bot_key}",
+                "notify_url": f"{HOST_URL}{COINREMITTER_HOOK}",  # Базовый URL без /bot_key
                 "name": f"Sub-{user_id[:4]}",  # Только латиница, цифры, дефис
                 "custom_data1": payment_id,
                 "expire_time_in_minutes": 30
