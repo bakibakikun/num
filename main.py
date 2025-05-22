@@ -51,13 +51,13 @@ def get_crypto_prices():
         return ton_price, btc_price, usdt_price
     except Exception as e:
         log.error(f"Ошибка получения курса: {e}")
-        return 5.0, 80000.0, 1.0  # Fallback: 1 TON = 5 USD, 1 BTC = 80,000 USD, 1 USDT = 1 USD
+        return 5.0, 60000.0, 1.0  # Fallback: 1 TON = 5 USD, 1 BTC = 60,000 USD, 1 USDT = 1 USD
 
 # Генерация QR-кода
-def generate_qr_code(address):
+def generate_qr_code(data):
     try:
         qr = qrcode.QRCode(version=1, box_size=10, border=4)
-        qr.add_data(address)
+        qr.add_data(data)
         qr.make(fit=True)
         img = qr.make_image(fill="black", back_color="white")
         buffered = BytesIO()
@@ -190,6 +190,7 @@ for bot_key, dp in dispatchers.items():
             payment_id = str(uuid.uuid4())
             ton_price, _, _ = get_crypto_prices()
             amount_ton = round(TARGET_PRICE_USD / ton_price, 4)
+            nano_ton = int(amount_ton * 1e9)  # TON в наноTON для QR
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
@@ -202,17 +203,16 @@ for bot_key, dp in dispatchers.items():
             conn.close()
             log.info(f"[{bot_key}] Сохранен TON платеж {payment_id} для пользователя {user_id}")
 
-            qr_base64 = generate_qr_code(TON_ADDRESS)
+            qr_data = f"ton://transfer/{TON_ADDRESS}?amount={nano_ton}"
+            qr_base64 = generate_qr_code(qr_data)
             if qr_base64:
                 qr_bytes = base64.b64decode(qr_base64)
-                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_ton} TON\nАдрес: {TON_ADDRESS}")
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"{TON_ADDRESS}")
             else:
-                await bot.send_message(chat_id, f"Оплатите {amount_ton} TON\nАдрес: {TON_ADDRESS}")
+                await bot.send_message(chat_id, f"{TON_ADDRESS}")
 
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_ton_{TON_ADDRESS}"))
-            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
-            log.info(f"[{bot_key}] Отправлен TON адрес пользователю {user_id}")
+            await bot.send_message(chat_id, f"Оплатите: {amount_ton} TON")
+            log.info(f"[{bot_key}] Отправлен TON адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка TON: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
@@ -241,17 +241,16 @@ for bot_key, dp in dispatchers.items():
             conn.close()
             log.info(f"[{bot_key}] Сохранен BTC платеж {payment_id} для пользователя {user_id}")
 
-            qr_base64 = generate_qr_code(BTC_ADDRESS)
+            qr_data = f"bitcoin:{BTC_ADDRESS}?amount={amount_btc}"
+            qr_base64 = generate_qr_code(qr_data)
             if qr_base64:
                 qr_bytes = base64.b64decode(qr_base64)
-                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_btc} BTC\nАдрес: {BTC_ADDRESS}")
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"{BTC_ADDRESS}")
             else:
-                await bot.send_message(chat_id, f"Оплатите {amount_btc} BTC\nАдрес: {BTC_ADDRESS}")
+                await bot.send_message(chat_id, f"{BTC_ADDRESS}")
 
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_btc_{BTC_ADDRESS}"))
-            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
-            log.info(f"[{bot_key}] Отправлен BTC адрес пользователю {user_id}")
+            await bot.send_message(chat_id, f"Оплатите: {amount_btc} BTC")
+            log.info(f"[{bot_key}] Отправлен BTC адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка BTC: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
@@ -283,30 +282,15 @@ for bot_key, dp in dispatchers.items():
             qr_base64 = generate_qr_code(USDT_ADDRESS)
             if qr_base64:
                 qr_bytes = base64.b64decode(qr_base64)
-                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"Оплатите {amount_usdt} USDT TRC20\nАдрес: {USDT_ADDRESS}")
+                await bot.send_photo(chat_id, photo=qr_bytes, caption=f"{USDT_ADDRESS}")
             else:
-                await bot.send_message(chat_id, f"Оплатите {amount_usdt} USDT TRC20\nАдрес: {USDT_ADDRESS}")
+                await bot.send_message(chat_id, f"{USDT_ADDRESS}")
 
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Скопировать адрес", callback_data=f"copy_usdt_{USDT_ADDRESS}"))
-            await bot.send_message(chat_id, "Скопируйте адрес для оплаты:", reply_markup=keyboard)
-            log.info(f"[{bot_key}] Отправлен USDT адрес пользователю {user_id}")
+            await bot.send_message(chat_id, f"Оплатите: {amount_usdt} USDT TRC20")
+            log.info(f"[{bot_key}] Отправлен USDT адрес и сумма пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка USDT: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
-
-    @dp.callback_query_handler(lambda c: c.data.startswith(("copy_ton_", "copy_btc_", "copy_usdt_")))
-    async def handle_copy_address(cb: types.CallbackQuery, bot_key=bot_key):
-        try:
-            address = cb.data.split("_", 2)[2]
-            chat_id = cb.message.chat.id
-            bot = bot_instances[bot_key]
-            await bot.answer_callback_query(cb.id, text="Адрес скопирован!")
-            await bot.send_message(chat_id, f"Скопирован адрес:\n```{address}```")
-            log.info(f"[{bot_key}] Скопирован адрес {address} для пользователя {cb.from_user.id}")
-        except Exception as e:
-            log.error(f"[{bot_key}] Ошибка копирования адреса: {e}")
-            await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
 
 # Временный обработчик корневого пути
 async def handle_root(req):
@@ -446,7 +430,7 @@ async def store_payment(req, bot_key):
         cursor.execute(
             f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT (label) DO UPDATE SET user_id = %s, status = %s",
-            (payment_id, user_id, "pending", payment_type, user_id, "pending")
+            (payment_id, user_id, "pending", "payment_type", user_id, "pending")
         )
         conn.commit()
         conn.close()
