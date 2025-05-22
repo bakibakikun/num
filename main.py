@@ -4,8 +4,10 @@ import uuid
 import psycopg2
 import hashlib
 import requests
+import qrcode
+from io import BytesIO
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from aiohttp import web
 from urllib.parse import urlencode
 import asyncio
@@ -24,19 +26,19 @@ log.info("Запуск бота подписки")
 # Определение путей и базы данных
 PAYMENT_STORE = "/store_payment"
 YOOMONEY_HOOK = "/yoomoney_hook"
-COINREMITTER_HOOK = "/coinremitter_hook"
+CRYPTO_BOT_HOOK = "/crypto_bot_hook"
 HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 HOST_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-COINREMITTER_API_KEY_TCN = os.getenv("COINREMITTER_API_KEY_TCN", "wkey_pyCGnCVlrawGdKl")
-COINREMITTER_PASSWORD_TCN = os.getenv("COINREMITTER_PASSWORD_TCN", "Lemon333")
+CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN", "403077:AANqFinpBzrjznz9XSxj4f9vQZzmnsm1sf8")
+METAMASK_ADDRESS = "0xYourMetaMaskAddress"  # Замени на свой TCN-адрес
 
 # Окружение
 ENV = "koyeb"
 log.info(f"Платформа: {ENV}")
 
-# Загрузка конфигураций ботов
+# Загрузка конфиURAций ботов
 SETTINGS = fetch_bot_settings()
 log.info(f"Настройка {len(SETTINGS)} ботов")
 bot_instances = {}
@@ -78,7 +80,8 @@ setup_database()
 def create_payment_buttons(user_id, price):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("ЮMoney", callback_data=f"yoomoney_{user_id}"))
-    keyboard.add(InlineKeyboardButton("Coinremitter", callback_data=f"coinremitter_{user_id}"))
+    keyboard.add(InlineKeyboardButton("TON", callback_data=f"crypto_bot_{user_id}"))
+    keyboard.add(InlineKeyboardButton("MetaMask (TCN)", callback_data=f"metamask_{user_id}"))
     return keyboard
 
 # Обработчики команд
@@ -102,6 +105,31 @@ for bot_key, dp in dispatchers.items():
             log.info(f"[{bot_key}] Отправлены варианты оплаты пользователю {user_id}")
         except Exception as e:
             log.error(f"[{bot_key}] Ошибка /start: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
+
+    @dp.message_handler(commands=["confirm_payment"])
+    async def confirm_payment(msg: types.Message, bot_key=bot_key):
+        try:
+            user_id = str(msg.from_user.id)
+            chat_id = msg.chat.id
+            bot = bot_instances[bot_key]
+            conn = psycopg2.connect(DB_URL)
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE payments_{bot_key} SET status = %s WHERE user_id = %s AND payment_type = %s AND status = %s",
+                ("success", user_id, "metamask_tcn", "pending")
+            )
+            conn.commit()
+            conn.close()
+            invite = await generate_channel_invite(bot_key, user_id)
+            if invite:
+                await bot.send_message(chat_id, f"Платеж подтвержден! Присоединяйтесь: {invite}")
+                log.info(f"[{bot_key}] Подтвержден MetaMask платеж для пользователя {user_id}")
+            else:
+                await bot.send_message(chat_id, "Ошибка приглашения. Свяжитесь с @YourSupportHandle.")
+                log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
+        except Exception as e:
+            log.error(f"[{bot_key}] Ошибка подтверждения платежа: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка. Попробуйте снова.")
 
     @dp.callback_query_handler(lambda c: c.data.startswith("yoomoney_"))
@@ -145,72 +173,108 @@ for bot_key, dp in dispatchers.items():
             log.error(f"[{bot_key}] Ошибка ЮMoney: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
-    @dp.callback_query_handler(lambda c: c.data.startswith("coinremitter_"))
-    async def handle_coinremitter_payment(cb: types.CallbackQuery, bot_key=bot_key):
+    @dp.callback_query_handler(lambda c: c.data.startswith("crypto_bot_"))
+    async def handle_crypto_bot_payment(cb: types.CallbackQuery, bot_key=bot_key):
         try:
             user_id = cb.data.split("_")[1]
             chat_id = cb.message.chat.id
             bot = bot_instances[bot_key]
             cfg = SETTINGS[bot_key]
             await bot.answer_callback_query(cb.id)
-            log.info(f"[{bot_key}] Выбран Coinremitter (TCN) пользователем {user_id}")
+            log.info(f"[{bot_key}] Выбран TON (CryptoBot) пользователем {user_id}")
 
-            if not COINREMITTER_API_KEY_TCN or not COINREMITTER_PASSWORD_TCN:
-                log.error(f"[{bot_key}] Отсутствуют ключи Coinremitter для TCN")
-                await bot.send_message(chat_id, "Coinremitter не настроен. Выберите другой способ.")
+            if not CRYPTO_BOT_TOKEN:
+                log.error(f"[{bot_key}] Отсутствует токен CryptoBot")
+                await bot.send_message(chat_id, "TON не настроен. Выберите другой способ.")
                 return
 
             payment_id = str(uuid.uuid4())
-            amount = cfg["PRICE"]
-            log.info(f"[{bot_key}] Создание Coinremitter инвойса: amount={amount}, currency=RUB, coin=TCN")
+            amount_ton = 0.1  # ~3 RUB
+            log.info(f"[{bot_key}] Создание TON инвойса: amount={amount_ton} TON")
 
-            headers = {"Accept": "application/json"}
-            payload = {
-                "api_key": COINREMITTER_API_KEY_TCN,
-                "password": COINREMITTER_PASSWORD_TCN,
-                "amount": amount,
-                "fiat_currency": "RUB",
-                "currency": "TCN",
-                "notify_url": "https://short-blinnie-bakibakikun-a88f041b.koyeb.app/coinremitter_hook",
-                "name": f"Sub-{user_id[:4]}",
-                "custom_data1": payment_id,
-                "expire_time_in_minutes": 30
-            }
             response = requests.post(
-                "https://coinremitter.com/api/v3/TCN/create-invoice",
-                headers=headers,
-                data=payload
+                "https://pay.crypt.bot/api/createInvoice",
+                json={
+                    "amount": amount_ton,
+                    "currency": "TON",
+                    "description": f"Подписка пользователя {user_id}",
+                    "payload": payment_id
+                },
+                headers={"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
             )
             result = response.json()
-            if result.get("flag") != 1:
-                log.error(f"[{bot_key}] Ошибка создания инвойса: {result}")
+            if not result.get("ok"):
+                log.error(f"[{bot_key}] Ошибка создания TON инвойса: {result}")
                 await bot.send_message(chat_id, "Ошибка создания платежа. Попробуйте снова.")
                 return
 
-            invoice_url = result["data"]["url"]
-            log.info(f"[{bot_key}] Инвойс создан: {invoice_url}")
+            invoice_url = result["result"]["payUrl"]
+            log.info(f"[{bot_key}] TON инвойс создан: {invoice_url}")
 
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
             cursor.execute(
                 f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
                 "VALUES (%s, %s, %s, %s)",
-                (payment_id, user_id, "pending", "coinremitter_tcn")
+                (payment_id, user_id, "pending", "crypto_bot_ton")
             )
             conn.commit()
             conn.close()
-            log.info(f"[{bot_key}] Сохранен Coinremitter платеж {payment_id} для пользователя {user_id}")
+            log.info(f"[{bot_key}] Сохранен TON платеж {payment_id} для пользователя {user_id}")
 
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("Оплатить через криптовалюту", url=invoice_url))
+            keyboard.add(InlineKeyboardButton("Оплатить через TON", url=invoice_url))
             await bot.send_message(
                 chat_id,
-                "Оплатите через криптовалюту (TCN для теста):\nПлатеж будет подтвержден автоматически.",
+                f"Оплатите {amount_ton} TON:\nПлатеж будет подтвержден автоматически.",
                 reply_markup=keyboard
             )
-            log.info(f"[{bot_key}] Отправлена ссылка Coinremitter (TCN) пользователю {user_id}")
+            log.info(f"[{bot_key}] Отправлена ссылка TON пользователю {user_id}")
         except Exception as e:
-            log.error(f"[{bot_key}] Ошибка Coinremitter платежа: {e}")
+            log.error(f"[{bot_key}] Ошибка TON платежа: {e}")
+            await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
+
+    @dp.callback_query_handler(lambda c: c.data.startswith("metamask_"))
+    async def handle_metamask_payment(cb: types.CallbackQuery, bot_key=bot_key):
+        try:
+            user_id = cb.data.split("_")[1]
+            chat_id = cb.message.chat.id
+            bot = bot_instances[bot_key]
+            await bot.answer_callback_query(cb.id)
+            log.info(f"[{bot_key}] Выбран MetaMask (TCN) пользователем {user_id}")
+
+            amount_tcn = 0.003  # ~3 RUB
+            uri = f"binance:{METAMASK_ADDRESS}?amount={amount_tcn}"
+
+            qr = qrcode.QRCode()
+            qr.add_data(uri)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+
+            payment_id = str(uuid.uuid4())
+            conn = psycopg2.connect(DB_URL)
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO payments_{bot_key} (label, user_id, status, payment_type) "
+                "VALUES (%s, %s, %s, %s)",
+                (payment_id, user_id, "pending", "metamask_tcn")
+            )
+            conn.commit()
+            conn.close()
+            log.info(f"[{bot_key}] Сохранен MetaMask платеж {payment_id} для пользователя {user_id}")
+
+            await bot.send_photo(
+                chat_id,
+                InputFile(buf, filename="payment_qr.png"),
+                caption=f"Оплатите {amount_tcn} TCN на адрес: {METAMASK_ADDRESS}\n"
+                        "После оплаты напишите /confirm_payment или свяжитесь с @YourSupportHandle."
+            )
+            log.info(f"[{bot_key}] Отправлен QR-код MetaMask пользователю {user_id}")
+        except Exception as e:
+            log.error(f"[{bot_key}] Ошибка MetaMask платежа: {e}")
             await bot_instances[bot_key].send_message(chat_id, "Ошибка оплаты. Попробуйте снова.")
 
 # Временный обработчик корневого пути
@@ -219,7 +283,7 @@ async def handle_root(req):
     return web.Response(status=200, text="OK")
 
 # Проверка вебхука ЮMoney
-def check_yoomoney_webhook(data, bppt_key):
+def check_yoomoney_webhook(data, bot_key):
     try:
         cfg = SETTINGS[bot_key]
         params = [
@@ -334,22 +398,22 @@ async def process_yoomoney_webhook(req):
         log.error(f"[{ENV}] Ошибка вебхука ЮMoney: {e}")
         return web.Response(status=500)
 
-# Обработчик вебхука Coinremitter
-async def process_coinremitter_webhook(req, bot_key=None):
+# Обработчик вебхука CryptoBot
+async def process_crypto_bot_webhook(req, bot_key=None):
     try:
-        # Проверяем, есть ли тело запроса
-        try:
-            data = await req.json()
-            log.info(f"[{bot_key or 'general'}] Вебхук Coinremitter: {data}")
-        except Exception as e:
-            log.warning(f"[{bot_key or 'general'}] Пустой или некорректный JSON в вебхуке Coinremitter: {e}")
-            return web.json_response({"status": "OK"}, status=200)  # JSON-ответ для тестов
+        data = await req.json()
+        log.info(f"[{bot_key or 'general'}] Вебхук CryptoBot: {data}")
 
-        payment_id = data.get("custom_data1")
+        update_type = data.get("type")
+        if update_type != "invoice_paid":
+            log.info(f"[{bot_key or 'general'}] Игнорируем вебхук: {update_type}")
+            return web.json_response({"ok": True}, status=200)
+
+        payment_id = data.get("payload")
         status = data.get("status")
-        currency = data.get("coin_short_name", "unknown").lower()
+        currency = data.get("currency", "unknown").lower()
         if not payment_id or not status:
-            log.error(f"[{bot_key or 'general'}] Отсутствуют данные Coinremitter")
+            log.error(f"[{bot_key or 'general'}] Отсутствуют данные CryptoBot")
             return web.Response(status=400, text="Отсутствуют данные")
 
         if not bot_key:
@@ -371,21 +435,21 @@ async def process_coinremitter_webhook(req, bot_key=None):
                 )
                 conn.commit()
                 bot = bot_instances[bot_key]
-                await bot.send_message(user_id, f"Платеж Coinremitter ({currency.upper()}) подтвержден!")
+                await bot.send_message(user_id, f"Платеж TON ({currency.upper()}) подтвержден!")
                 invite = await generate_channel_invite(bot_key, user_id)
                 if invite:
                     await bot.send_message(user_id, f"Присоединяйтесь к каналу: {invite}")
-                    log.info(f"[{bot_key}] Coinremitter платеж {payment_id} ({currency.upper()}) обработан для пользователя {user_id}")
+                    log.info(f"[{bot_key}] TON платеж {payment_id} ({currency.upper()}) обработан для пользователя {user_id}")
                 else:
                     await bot.send_message(user_id, "Ошибка приглашения. Свяжитесь с @YourSupportHandle.")
                     log.error(f"[{bot_key}] Не удалось создать приглашение для пользователя {user_id}")
             else:
                 log.error(f"[{bot_key}] Платеж {payment_id} не найден")
             conn.close()
-        return web.json_response({"status": "OK"}, status=200)
+        return web.json_response({"ok": True}, status=200)
     except Exception as e:
-        log.error(f"[{bot_key or 'general'}] Ошибка вебхука Coinremitter: {e}")
-        return web.json_response({"status": "OK"}, status=200)
+        log.error(f"[{bot_key or 'general'}] Ошибка вебхука CryptoBot: {e}")
+        return web.json_response({"ok": True}, status=200)
 
 # Обработчик хранения платежей
 async def store_payment(req, bot_key):
@@ -462,15 +526,15 @@ async def launch_server():
         app = web.Application()
         app.router.add_post("/", handle_root)
         app.router.add_post(YOOMONEY_HOOK, process_yoomoney_webhook)
-        app.router.add_post(COINREMITTER_HOOK, process_coinremitter_webhook)
+        app.router.add_post(CRYPTO_BOT_HOOK, process_crypto_bot_webhook)
         app.router.add_get(HEALTH_CHECK, check_status)
         app.router.add_post(HEALTH_CHECK, check_status)
         for bot_key in SETTINGS:
             app.router.add_post(f"{YOOMONEY_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_yoomoney_webhook(req))
-            app.router.add_post(f"{COINREMITTER_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_coinremitter_webhook(req, bot_key=bot_key))
+            app.router.add_post(f"{CRYPTO_BOT_HOOK}/{bot_key}", lambda req, bot_key=bot_key: process_crypto_bot_webhook(req, bot_key=bot_key))
             app.router.add_post(f"{PAYMENT_STORE}/{bot_key}", lambda req, bot_key=bot_key: store_payment(req, bot_key))
             app.router.add_post(f"{WEBHOOK_BASE}/{bot_key}", lambda req, bot_key=bot_key: process_bot_webhook(req, bot_key))
-        log.info(f"Активные пути: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {COINREMITTER_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}, /")
+        log.info(f"Активные пути: {HEALTH_CHECK}, {YOOMONEY_HOOK}, {CRYPTO_BOT_HOOK}, {PAYMENT_STORE}, {WEBHOOK_BASE}, /")
 
         port = int(os.getenv("PORT", 8000))
         runner = web.AppRunner(app)
