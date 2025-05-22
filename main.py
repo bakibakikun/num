@@ -28,8 +28,8 @@ HEALTH_CHECK = "/status"
 WEBHOOK_BASE = "/bot_hook"
 DB_URL = "postgresql://postgres.iylthyqzwovudjcyfubg:Alex4382!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 BASE_URL = os.getenv("HOST_URL", "https://short-blinnie-bakibakikun-a88f041b.koyeb.app")
-COINREMITTER_API_KEY_TCN = os.getenv("COINREMITTER_API_KEY_TCN")
-COINREMITTER_PASSWORD_TCN = os.getenv("COINREMITTER_PASSWORD_TCN")
+COINREMITTER_API_KEY_TCN = os.getenv("wkey_pyCGnCVlrawGdKl")
+COINREMITTER_PASSWORD_TCN = os.getenv("Lemon333")
 
 # Окружение
 ENV = "koyeb"
